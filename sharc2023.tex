@@ -87,9 +87,9 @@ For the SRP, the cyclic autocorrelation estimate at lag $\tau=0$ is a DFT of the
 \widehat{R}_{X}^{\alpha_m}[0]=\frac{1}{N}\sum_{n=0}^{N-1}|X[n]|^2e^{-j2\pi mn/N},
 \quad \alpha_m=\frac{mf_s}{N}.
 \end{equation}
-The DC bin is excluded. Because $|X[n]|^2$ is real, only the unique positive-frequency bins $m=1,\ldots,\lfloor N/2\rfloor$ need be tested. Off-grid cycle frequencies can leak into adjacent bins, so candidate grouping and the family-wise false-alarm rate across the search grid must be characterized. The SRP and CFD statistics also require separate threshold calibration unless their scaling and noise bandwidths are normalized.
+Because $|X[n]|^2$ is real, only one spectral half is unique. The saved RTL tests $m=2,\ldots,N/2-1$, excluding DC, bin 1 as a bleedover guard, Nyquist, and negative frequencies. It does not group adjacent candidates; leakage and family-wise false alarms therefore require full-grid calibration. SRP and CFD scaling also requires separate calibration.
 
-An $N$-point FFT requires $O(N)$ frame state, but whether that state uses BRAM, distributed memory, or both depends on the selected streaming or burst architecture, scaling, and output order~\cite{amd-pg109}. A single FFT can use less memory than FFT-array SCA architectures, but that comparison was not measured here.
+FFT storage and latency are architecture-dependent; an $N$-point core requires $O(N)$ state~\cite{amd-pg109}. The saved 65,536-point, 16-bit fixed-point core is pipelined, unscaled, natural-order, and BRAM-backed. Its XCKU5P checkpoint and conflicting 100/125-MHz metadata do not identify the Table~\ref{tab:resources} build.
 
 \begin{figure}[!t]
 \centering
@@ -99,7 +99,7 @@ An $N$-point FFT requires $O(N)$ frame state, but whether that state uses BRAM, 
 \end{figure}
 
 \subsection{Center-Frequency Estimator}
-In prior simulation, a fixed two-tap smoother was reported as adequate for the tested cases~\cite{gormley-msee21}; this observation does not establish periodogram convergence generally. Hardware observations motivated the selectable low-pass-filter bank in Fig.~\ref{fig:filt_bank}. The archived record does not retain filter coefficients or a before-and-after detection metric, so the magnitude of the reported accuracy improvement cannot be independently checked.
+Earlier simulation found a fixed two-tap smoother adequate for its tested cases, not for general convergence~\cite{gormley-msee21}. The saved snapshot contains 128 banks of 41 signed 16-bit FIR taps, spaced by 488.28125~kHz at $f_s=125$~MHz, but no before-and-after metric or noise-bandwidth calibration.
 
 \begin{figure}[!t]
 \centering
@@ -109,7 +109,7 @@ In prior simulation, a fixed two-tap smoother was reported as adequate for the t
 \end{figure}
 
 \subsection{Center-Frequency Detector}
-The CFD retains the functionality in~\cite{gormley-ccaaw21}, while thresholding is moved to the top-level StSS and SRP; Fig.~\ref{fig:cfd} shows the simplified data path.
+The CFD retains the functionality in~\cite{gormley-ccaaw21}, with thresholding moved to the StSS and SRP. In the saved snapshot, sweep wrap resets before comparing the final center-frequency result, omitting that endpoint; output alignment also requires re-verification.
 
 \begin{figure}[!t]
 \centering
@@ -119,7 +119,7 @@ The CFD retains the functionality in~\cite{gormley-ccaaw21}, while thresholding 
 \end{figure}
 
 \subsection{Symbol-Rate Distributor}
-The symbol-rate distributor (SRD) replaces the earlier polling distributor and FIFO commutator~\cite{gormley-ccaaw21} with a one-hot priority encoder and decoder. This simplifies the described control path, but the preserved results do not quantify resource savings or reliability. As Fig.~\ref{fig:srd} notes, a candidate is discarded when every CFD is busy; throughput and detection claims therefore require a candidate-drop measurement.
+The SRD replaces the earlier polling distributor and FIFO commutator~\cite{gormley-ccaaw21} with one-hot priority logic. The saved active path has no candidate backpressure: it drops candidates when all CFDs are busy and results when their FIFOs are full, without retry or loss counters. Resource savings and reliability were not measured.
 
 \begin{figure}[!t]
 \centering
@@ -142,7 +142,7 @@ Additional CFDs increase concurrent service capacity until another component bec
 
 \balance
 \section{Results and Limitations}
-The resource totals in Table~\ref{tab:resources} identify the target as a Virtex-7 XC7VX485T~\cite{amd-ds180}; the original identifier was \texttt{xc7k7-t}, which is not a valid identifiable device. The package and speed grade are not preserved. The reported configuration used 16-bit data, $N=2^{16}$ samples, and two CFD instances. A latency of 34.36~s from transmission start to first result was reported, but the sample rate, FPGA clock, search-grid dimensions, FFT configuration, cycle count, and stall behavior are unavailable. Consequently, that number cannot be reproduced or converted into an end-to-end throughput comparison.
+The Table~\ref{tab:resources} capacities identify the reported target as a Virtex-7 XC7VX485T~\cite{amd-ds180}; \texttt{xc7k7-t} is invalid, and the package, speed grade, and build remain unknown. The reported design used 16-bit data, $N=2^{16}$, and two CFDs. The saved configuration reconstructs 34.36~s as a full-resolution sweep: for \texttt{FcStep}$=1$, $f_s=125$~MHz, one sample per clock, and no stalls, $2^{16}N/f_s=34.359738368$~s. Two CFDs parallelize candidates, not an individual sweep. This is a conditional calculation, not a retained measurement or throughput comparison.
 
 \begin{table}[!t]
 \caption{Reported XC7VX485T Resource Utilization}
@@ -163,7 +163,7 @@ DSP48E1 slices & 284 & 2,800 & 10.14\% \\
 The four percentages are arithmetically consistent with the reported counts. The fractional BRAM value denotes an 18-Kb block counted as half of a 36-Kb equivalent. One utilization point demonstrates fit on this device but cannot establish scaling with CFD count, timing closure, power, reliability, or suitability for smaller edge FPGAs.
 
 \section{Conclusion}
-The architecture combines an instantaneous-power FFT preprocessor with the StSCA and a two-CFD distributor. The preserved synthesis summary shows that this configuration fits an XC7VX485T. It does not contain the measurements needed to demonstrate a throughput increase or maintain a calibrated detection operating point after preprocessing. A reproducible evaluation should release the HDL and testbench; identify the complete FPGA part, tool version, clock and FFT settings; report baseline-versus-hybrid frames or candidates per second; measure candidate drops and $P_d/P_{\mathrm{fa}}$ over the full search grid; and sweep CFD count to establish resource scaling. Goertzel single-bin DFT implementations and normalized spectral-coherence statistics remain hypotheses to benchmark rather than demonstrated improvements.
+The architecture combines an instantaneous-power FFT preprocessor with the StSCA and a two-CFD distributor. The reported counts fit an XC7VX485T, but the saved artifacts do not identify their build or demonstrate throughput or calibrated detection. Reproduction requires an identified source revision and FPGA part, a portable self-checking testbench, configuration and synthesis reports, baseline comparison, drop and $P_d/P_{\mathrm{fa}}$ measurements, and a CFD-count sweep. Goertzel DFTs and normalized coherence remain proposals to benchmark.
 
 \bibliographystyle{IEEEtran}
 \bibliography{IEEEabrv,refs}
