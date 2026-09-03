@@ -1,172 +1,171 @@
+\newcommand{\CLASSINPUTinnersidemargin}{0.75in}
+\newcommand{\CLASSINPUToutersidemargin}{0.75in}
+\newcommand{\CLASSINPUTtoptextmargin}{0.75in}
+\newcommand{\CLASSINPUTbottomtextmargin}{1.125in}
 \documentclass[conference]{IEEEtran}
-\IEEEoverridecommandlockouts
-\usepackage{amsmath,
-			amssymb,
-			amsfonts}
-\usepackage{anyfontsize}
-\usepackage{mathtools} % ceil, floor
-    \DeclarePairedDelimiter\ceil{\lceil}{\rceil}
-    \DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
-\usepackage{orcidlink}
-\usepackage{xfrac} % sfrac
 
+\IEEEoverridecommandlockouts
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{balance}
+\usepackage{booktabs}
+\usepackage{cite}
+\usepackage{graphicx}
+\usepackage{url}
+
+\setlength{\columnsep}{0.25in}
+\pdfinfo{
+  /Title (A Hybrid Preprocessor Architecture for the Streaming Spectrum Sensor)
+  /Author (Dylan J. Gormley)
+  /Subject (Post-publication fact-checked author revision)
+  /Keywords (streaming spectrum sensor, spectral correlation, FPGA, edge computing)
+}
 
 \begin{document}
 
-\title{A Hybrid Technique to Increase Throughput of the Streaming Spectrum Sensor \\
-\thanks{This work was supported by the National Aeronautics and Space Administration's (NASA) Space Communications and Navigation Program (SCaN).  This work was performed by NASA Glenn Research Center's (GRC) Cognitive Signal Processing Branch to support NASA's Cognitive Communications Project.}}
+\title{\textbf{A Hybrid Preprocessor Architecture for the Streaming Spectrum Sensor}
+\thanks{This work was supported by the National Aeronautics and Space Administration's (NASA) Space Communications and Navigation Program (SCaN). This work was performed by NASA Glenn Research Center's (GRC) Cognitive Signal Processing Branch to support NASA's Cognitive Communications Project.}
+\thanks{Post-publication fact-checked author revision, September 2026. The version of record appeared in the 2023 IEEE Space Hardware and Radio Conference (SHaRC), pp.~34--36, doi: 10.1109/SHaRC56958.2023.10046267.}}
 
-\author{\IEEEauthorblockN{Dylan J. Gormley \orcidlink{0000-0002-8140-8248}}
+\author{\IEEEauthorblockN{Dylan J. Gormley}
 \IEEEauthorblockA{\textit{Cognitive Signal Processing Branch} \\
 \textit{NASA Glenn Research Center}\\
 Cleveland, OH, USA \\
 dylan.j.gormley@nasa.gov}}
 
-% Remember, if you use this you must call \IEEEpubidadjcol in the second column for its text to clear the IEEEpubid mark.
-\IEEEpubid{\makebox[\columnwidth]{U.S. government work not protected under U.S. copyright law.}} 
+\IEEEpubid{\makebox[\columnwidth]{U.S. Government work not protected by U.S. copyright.}}
 
 \maketitle
 
 \begin{abstract}
-In previous work, there has been significant progress on edge device RF feature detection using a hardware algorithm known as the streaming spectrum sensor (StSS).  Unlike other spectrum sensor implementations, the StSS can function on edge devices due to its low memory requirements.  While the StSS accomplishes its objective of low memory detection, it sacrifices detection throughput.  This work investigates a hybrid technique to balance memory and throughput.
+Previous work introduced the streaming spectrum sensor (StSS), a low-memory field-programmable gate array architecture that serially evaluates trial symbol-rate and center-frequency pairs. This paper describes a fast Fourier transform (FFT) symbol-rate preprocessor intended to reject most trial cycle-frequency bins before streaming spectral correlation analysis. In an illustrative case, reducing 11 downstream evaluations to two gives a 5.5-fold upper bound on the speedup before preprocessor overhead. A two-detector implementation is reported to fit a Virtex-7 XC7VX485T. Because the preserved results contain neither a serial baseline nor post-preprocessor detection, timing-closure, or power measurements, they establish implementation fit rather than measured end-to-end throughput or edge-device suitability.
 \end{abstract}
 
 \begin{IEEEkeywords}
-streaming spectrum sensor, streaming spectral correlation analyzer, RF feature detection, edge computing
+streaming spectrum sensor, spectral correlation, RF feature detection, FPGA, edge computing
 \end{IEEEkeywords}
 
 \section{Introduction}
-A device that can detect radio frequency (RF) spectrum features, whatever the method, is known as a  spectrum sensor.  The use of this knowledge to improve radio performance is known as cognitive radio (CR).  One common technique of RF feature detection is using what is known as spectral correlation analyzers (SCA).  SCAs estimate a given channel's spectral correlation function (SCF), also called cyclic spectral density (CSD).  Various implementations are available in the literature, such as the SSCA and FAM, each with strengths and weaknesses \cite{gormley-msee21}.
+Spectrum sensing can provide environmental knowledge that a cognitive radio uses to adapt its operation. One family of feature detectors estimates a signal's spectral correlation function (SCF), also called cyclic spectral density. Common estimators include the strip spectral correlation analyzer and FFT accumulation method; their resource and resolution tradeoffs are reviewed in~\cite{gormley-msee21}.
 
-This paper focuses on one implementation method, the streaming spectral correlation analyzer (StSCA).  This method functions on severely resource-constrained platforms, known as edge devices, by estimating the SCF with a focus on memory efficiency.  The results of the StSCA are part of the streaming spectrum sensor (StSS).  The StSS uses peak detection and a threshold on the SCF generated by the StSCA to detect the symbol rate and center frequency offset of active users in a channel.
-
-The original StSCA design is developed in \cite{gormley-msee21}.  The original streaming spectrum sensor design is developed in \cite{gormley-ccaaw21}.  StSS-based applications for CR are discussed in \cite{gormley-ccaaw21} and \cite{dudukovich-rfid22}.  This paper discusses design improvements to the StSS.  It is primarily concerned with adding a preprocessor component to increase throughput at a minimal memory cost.  Also covered in this paper are minor design updates that increase performance, reliability, and resource consumption.  Resource utilization is provided for a sample device.  
+The streaming spectral correlation analyzer (StSCA) was developed to estimate selected SCF points with low block random access memory (BRAM) use~\cite{gormley-msee21}. The streaming spectrum sensor (StSS) adds peak detection and a power-scaled threshold to estimate the symbol rate and center-frequency offset of active signals~\cite{gormley-ccaaw21}. Related cognitive-networking applications are discussed in~\cite{gormley-ccaaw21,dudukovich-rfid22}. This paper describes an FFT preprocessor and scheduling updates intended to reduce serial StSCA work. The preserved evidence supports resource-utilization claims for one FPGA configuration; claims that require new measurements are identified explicitly.
 
 \section{Background}
-To review \cite{gormley-msee21}, the StSCA output is related to the input by the following equation:
-\begin{equation} \label{eq:stsca}
-	S_{X}^{v}[k] = \frac{1}{N} \sum_{n=0}^{N-1} {|	X[n]e^{-j2\pi kn}*h[n]|}^{2} e^{-j2\pi vn}.
-\end{equation}
+Let $X[n]$ be a complex sample sequence acquired at sample rate $f_s$, let $f_k$ be a trial frequency shift, and let $\alpha_v$ be a trial cycle frequency. For an $N$-sample record, the finite-record StSCA estimate can be written as
+\begin{align}
+y_{v,k}[n] &= \sum_{\ell} h_v[\ell]X[n-\ell]
+e^{-j2\pi f_k(n-\ell)/f_s}, \label{eq:channelized}\\
+\widehat{S}_{X}^{\alpha_v}(f_k) &= \frac{1}{N}\sum_{n=0}^{N-1}
+|y_{v,k}[n]|^2 e^{-j2\pi\alpha_v n/f_s}. \label{eq:stsca}
+\end{align}
+Here, $h_v[\ell]$ is the low-pass filter selected for cycle-frequency branch $v$. Equation~\eqref{eq:stsca} estimates one configured $(\alpha_v,f_k)$ point rather than the continuous SCF; its derivation and mapping to symbol rate and center frequency are given in~\cite{gormley-msee21}.
 
-Derivation of this equation and a further discussion of its notation can be found in \cite{gormley-msee21}.  The output $S_{X}^{v}[k]$ is the SCF point corresponding to inputs $(X,v,k)$.  The StSS compares the results of the StSCA to the threshold (\ref{eq:cfd}), which results in a list of detected RF features.
-
+The center-frequency detector (CFD) applies the test
 \begin{equation}\label{eq:cfd}
-  	{|S^{v}_{X}[k]|}^{2}
-  	\underset{H_{0}}{\overset{H_{1}}{\gtrless}}
-  	\beta \Bigg(\frac{1}{N} \sum_{n=0}^{N-1} {|X[n]|}^{2}\Bigg)^{2}.
+|\widehat{S}_{X}^{\alpha_v}(f_k)|^2
+\underset{H_0}{\overset{H_1}{\gtrless}}
+\beta_{\mathrm{CFD}}{\left(\frac{1}{N}\sum_{n=0}^{N-1}|X[n]|^2\right)}^{2}.
 \end{equation}
+The dimensionless multiplier $\beta_{\mathrm{CFD}}$ sets an operating point; it is not itself the probability of false alarm. The calibration in~\cite{gormley-ccaaw21} was specific to that paper's waveform, channel, search grid, and decision objective. The reported validation scope is M-ary quadrature-amplitude modulation (M-QAM) with square-root-raised-cosine (SRRC) pulse shaping. Operation on other modulation and pulse-shape families was not demonstrated.
 
-The StSCA was designed to detect symbol rates and center frequency offsets for M- Quadrature Amplitude Modulation (QAM).  Though not tested, it should theoretically work for a wide range of modulations, pulse-shape filters, and line encodings.  Further discussion and definitions can be found at \cite{spooner-SCFs}.
-
-% must be in the second column of the first page, where ever that may be
 \IEEEpubidadjcol
 
 \section{Design Overview}
+\subsection{Symbol-Rate Preprocessor}
+The original StSCA avoids FFT cores by processing one configured $(\alpha_v,f_k)$ point in a streaming fashion. The preprocessor concept---an FFT of the instantaneous power followed by candidate selection---was described by Koch and Downey~\cite{koch-downey19} and recommended for the StSCA in~\cite{gormley-msee21}. The present architecture integrates that concept with the StSS so that only selected cycle-frequency candidates are sent to the CFDs.
 
-\subsection{New Component:  Symbol Rate Preprocessor (SRP)}
-The objective of the original StSCA was to avoid the use of fast Fourier transform (FFT) components in order to save device block random access memory (BRAM).  Thus, the samples are processed in a streaming fashion instead of FFT blocks.  In this update, we add one FFT component as a preprocessor to improve the speed of the StSCA.  Since this is the addition of only one FFT, as opposed to an array of FFTs, such as those used in other SCA implementations, the memory use is still low and suitable for edge devices.  The original StSCA estimates the entire SCF at every symbol rate and center frequency pair.  By adding an SRP, we instead only process symbol rates of interest, and that is, symbol rates that exceed our optimal threshold.
+Figure~\ref{fig:srp_ex} illustrates 11 evaluated cycle-frequency bins, of which two exceed the plotted threshold. Skipping nine bins reduces downstream evaluations by 81.8\%. If each serial CFD evaluation costs $T_{\mathrm{CFD}}$ and the preprocessor costs $T_{\mathrm{SRP}}$, the corresponding ideal work ratio is $11T_{\mathrm{CFD}}/(T_{\mathrm{SRP}}+2T_{\mathrm{CFD}})<5.5$. Thus, 5.5 is an upper bound for this example, not a measured throughput gain.
 
-In Fig. \ref{fig:srp_ex} we find that every point of the SCF has been estimated for a given channel.  Realistically, only the symbol rates that exceed the threshold should be passed to the StSCA for processing.  In this example, 11 symbol rates have been calculated, but only two exceed the threshold.  Therefore, only two symbol rates should be further processed using the StSCA.  Assuming no parallelization, the preprocessor increases the system's throughput by a factor of nine.
-
-\begin{figure}[htbp]
-\centerline{\includegraphics[width=0.5\textwidth]{figs/srp_ex.png}}
-\caption{In this example SCF there are two co-channel users.  The first has RF features $(R_{s}=0.1MBd,F_{offset}=-0.2MHz)$.  The second has RF features ${R_{s}=0.25MBd,F_{offset}=0.2MHz}$.}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figs/srp_ex.png}
+\caption{Illustrative SCF result for two simulated in-band signals: $(R_s=0.10~\mathrm{MBd}, f_{\mathrm{offset}}=-0.20~\mathrm{MHz})$ and $(R_s=0.25~\mathrm{MBd}, f_{\mathrm{offset}}=0.20~\mathrm{MHz})$. The threshold test is applied to the squared-magnitude statistic in~\eqref{eq:cfd}.}
 \label{fig:srp_ex}
-\end{figure} 
+\end{figure}
 
-In Fig. \ref{fig:srp}, we use the new SRP component to calculate the discrete cyclic autocorrelation function (CAF) evaluated at $\tau=0$.  This special case of the CAF simplifies to the form of a DFT, but with a magnitude-squared input and is written as
-
+For the SRP, the cyclic autocorrelation estimate at lag $\tau=0$ is a DFT of the real-valued instantaneous power:
 \begin{equation}\label{eq:caf}
-R[v]=R^v_{X}[0]=\frac{1}{N} \sum_{n=0}^{N-1} |X[n]|^{2} e^{-j2 \pi vn}.
+\widehat{R}_{X}^{\alpha_m}[0]=\frac{1}{N}\sum_{n=0}^{N-1}|X[n]|^2e^{-j2\pi mn/N},
+\quad \alpha_m=\frac{mf_s}{N}.
 \end{equation}
+The DC bin is excluded. Because $|X[n]|^2$ is real, only the unique positive-frequency bins $m=1,\ldots,\lfloor N/2\rfloor$ need be tested. Off-grid cycle frequencies can leak into adjacent bins, so candidate grouping and the family-wise false-alarm rate across the search grid must be characterized. The SRP and CFD statistics also require separate threshold calibration unless their scaling and noise bandwidths are normalized.
 
-Derivation of this equation can be found in \cite{gormley-msee21}.  Computing the DFT using an FFT algorithm must store $N$ values before producing the result, which consumes large amounts of BRAM.  However, even with this BRAM consumption, a single FFT is much more memory efficient than alternative SCA methods.  A block diagram of the digital design is shown in Fig. \ref{fig:srp}.
+An $N$-point FFT requires $O(N)$ frame state, but whether that state uses BRAM, distributed memory, or both depends on the selected streaming or burst architecture, scaling, and output order~\cite{amd-pg109}. A single FFT can use less memory than FFT-array SCA architectures, but that comparison was not measured here.
 
-\begin{figure}[htbp]
-\centerline{\includegraphics[width=0.5\textwidth]{figs/SRP.png}}
-\caption{Unlike the symbol rate estimator from \cite{gormley-msee21}, which processes a single-term DFT instances serially, the SRP processes all terms using a $N$-point FFT.}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figs/SRP.png}
+\caption{SRP block diagram. The FFT computes all $N$ DFT bins for the instantaneous-power sequence; the earlier StSCA evaluates configured DFT bins serially.}
 \label{fig:srp}
 \end{figure}
 
-In the last section of this paper, we will show that even with this new component, BRAM utilization on a CR remains conservative.  
+\subsection{Center-Frequency Estimator}
+In prior simulation, a fixed two-tap smoother was reported as adequate for the tested cases~\cite{gormley-msee21}; this observation does not establish periodogram convergence generally. Hardware observations motivated the selectable low-pass-filter bank in Fig.~\ref{fig:filt_bank}. The archived record does not retain filter coefficients or a before-and-after detection metric, so the magnitude of the reported accuracy improvement cannot be independently checked.
 
-\subsection{Component Update:  Center Frequency Estimator (CFE)}
-Fig. \ref{fig:filt_bank} shows the CFE component, which is also the top-level component for the StSCA.   In simulation of the original StSCA, it was found that a static filter of two taps was sufficient to force periodogram convergence and provide accurate detection of the center frequency offsets \cite{gormley-msee21}.  During actual hardware experiments, however, it was found that as a result of noise and quantization error, two taps were not sufficient.  This led to the development of a multiplexer to select between low-pass filter (LPF) banks.  A block design of the LPF bank is shown in Fig. \ref{fig:filt_bank}.
-
-\begin{figure}[htbp]
-\centerline{\includegraphics[width=0.5\textwidth]{figs/filt_bank.png}}
-\caption{A bank is selected by $v$ and corresponds to an LPF cutoff $v$. Alternatively, using a subset of filter banks instead of a one-to-one match of $v$ to $f_{cutoff}=v$ is a tradeoff between detection accuracy and memory efficiency.}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figs/filt_bank.png}
+\caption{Selectable low-pass-filter bank. Branch $v$ selects a filter with cutoff $f_{c,v}$; the coefficients, cutoff convention, gain, and equivalent noise bandwidth are required to reproduce the detector calibration.}
 \label{fig:filt_bank}
 \end{figure}
 
-Hardware center frequency offset detection accuracy was dramatically improved using this multiplexer with a small number of taps per LPF.
+\subsection{Center-Frequency Detector}
+The CFD retains the functionality in~\cite{gormley-ccaaw21}, while thresholding is moved to the top-level StSS and SRP; Fig.~\ref{fig:cfd} shows the simplified data path.
 
-\subsection{Component Update:  Center Frequency Detector (CFD)}
-The CFD component logic has been simplified, but the overall functionality remains the same as the original design developed in \cite{gormley-ccaaw21}.  Previously, the threshold was in this component but has been moved to the StSS component and is utilized in the newly developed SRP.  A block design of the CFD is shown in Fig. \ref{fig:cfd}.
-
-\begin{figure}[htbp]
-\centerline{\includegraphics[width=0.5\textwidth]{figs/CFD.png}}
-\caption{The CFD generates $k$ using on some step size $r_{s}$, detects the StSCA peak $k$ for some $v$, and to maintain alignments of results.}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figs/CFD.png}
+\caption{CFD block diagram. The trial center frequency $f_k$ advances by step $r_k$; for a selected $\alpha_v$, peak selection operates on $|\widehat{S}_{X}^{\alpha_v}(f_k)|^2$.}
 \label{fig:cfd}
 \end{figure}
 
-\subsection{Component Update:  Symbol Rate Distributor (SRD)}
-What was previously called the spectrum sensor component is now called the SRD component.  This component was redesigned from a polling-based distributor in \cite{gormley-ccaaw21} to a one-hot priority encoder-based distributor.  The previous FIFO commutator from \cite{gormley-ccaaw21} was replaced with a one-hot decoder commutator.  Fig. \ref{fig:srd} shows the updated block design.  These updates simplify the logic, increase reliability, and reduce memory consumption.
+\subsection{Symbol-Rate Distributor}
+The symbol-rate distributor (SRD) replaces the earlier polling distributor and FIFO commutator~\cite{gormley-ccaaw21} with a one-hot priority encoder and decoder. This simplifies the described control path, but the preserved results do not quantify resource savings or reliability. As Fig.~\ref{fig:srd} notes, a candidate is discarded when every CFD is busy; throughput and detection claims therefore require a candidate-drop measurement.
 
-\begin{figure}[htbp]
-\centerline{\includegraphics[width=0.5\textwidth]{figs/SRD.png}}
-\caption{A symbol rate is fed in from the SRP and passed to a CFD marked \texttt{ready}. If no CFDs are \texttt{ready} at the time of arrival of a new symbol rate, then that $v$ is discarded. CFDs are synchronized to only start at a new when the sample count is $0$. Using this synchronization, each CFD can be delayed equal to its index number, creating output staggering. This allows for commutation of results without needing a buffer or flow control.}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figs/SRD.png}
+\caption{SRD block diagram. A candidate from the SRP is assigned to a \texttt{ready} CFD; if none is ready, the candidate is discarded. Each CFD starts at the beginning of an $N$-sample frame; index-based staggering permits result commutation under the assumed fixed-latency, no-stall schedule.}
 \label{fig:srd}
 \end{figure}
 
-\subsection{Component Update:  Streaming Spectrum Sensor}
-This component now encompasses the threshold \cite{gormley-ccaaw21}, SRP, SRD, and result FIFOs.  Additionally, this component is tasked with tracking sample and result counts.  The primary function of the streaming spectrum sensor component is still to interact with external components such as the analog to digital converter (ADC) and CPU-based dynamic spectrum manager (DSM).  Fig. \ref{fig:top} shows the redesign of the StSS component.  
+\subsection{Streaming Spectrum Sensor}
+The top-level StSS contains the threshold logic, SRP, SRD, and result FIFOs and tracks sample and result counts. It interfaces with an analog-to-digital converter and a CPU-based dynamic spectrum manager (DSM).
 
-\begin{figure}[htbp]
-\centerline{\includegraphics[width=0.5\textwidth]{figs/TOP.png}}
-\caption{The DSM sets the probability of false alarm $\beta$, which is used to calculate the threshold. A method to determine the optimal value of $\beta$ is discussed in \cite{gormley-ccaaw21}.}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figs/TOP.png}
+\caption{StSS block diagram. The DSM configures threshold multipliers and center-frequency search resolution. A target false-alarm probability must be mapped to each multiplier by calibration for the selected waveform, channel, grid, filters, and fixed-point scaling.}
 \label{fig:top}
 \end{figure}
 
-Generally, a higher CFD count lessens the need for $\beta$ precision.  The DSM can set the center frequency offset resolution, which is used to iterate through channelizer inputs \cite{gormley-msee21}.  Results are counted and provided to the DSM for CR use, such as those discussed in \cite{dudukovich-rfid22}.
+Additional CFDs increase concurrent service capacity until another component becomes the bottleneck; they do not reduce the statistical precision required for threshold calibration.
 
-\section{Results}
-Results in this section were computed using the Xilinx xc7k7-t, a bit width of $16$, $2^{16}$ samples, and $2$ CFD instances.  Every parallel CFD operation increases \textit{maximum} throughput.  The goal is to select the maximum possible parallel operation size the platform can support while performing its other mission needs, such as baseband processing or interfacing.  For the given parameters, latency is between the start of transmission, and the first result is $34.36s$.  Resource consumption is shown in Tab. \ref{tab:resources}.  As the number of CFDs increases, BRAM consumption grows disproportionately from the other resources.
+\balance
+\section{Results and Limitations}
+The resource totals in Table~\ref{tab:resources} identify the target as a Virtex-7 XC7VX485T~\cite{amd-ds180}; the original identifier was \texttt{xc7k7-t}, which is not a valid identifiable device. The package and speed grade are not preserved. The reported configuration used 16-bit data, $N=2^{16}$ samples, and two CFD instances. A latency of 34.36~s from transmission start to first result was reported, but the sample rate, FPGA clock, search-grid dimensions, FFT configuration, cycle count, and stall behavior are unavailable. Consequently, that number cannot be reproduced or converted into an end-to-end throughput comparison.
 
-\begin{table}
-\caption{Resource Utilization}
-\begin{center}
-\begin{tabular}{ |c|c|c|c| }
-\hline
-Resource  & Used  & Available & Utilization \\
-\hline
-LUTs      & 22463 & 303600    &  7.40\%     \\ 
-Registers & 15426 & 607200    &  2.54\%     \\  
-BRAMs     & 186.5 & 1030      & 18.11\%     \\
-DSPs      & 284   & 2800      & 10.14\%     \\
-\hline
-\end{tabular}
-\end{center}
+\begin{table}[!t]
+\caption{Reported XC7VX485T Resource Utilization}
 \label{tab:resources}
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Resource & Used & Available & Utilization \\
+\midrule
+Slice LUTs & 22,463 & 303,600 & 7.40\% \\
+Flip-flops & 15,426 & 607,200 & 2.54\% \\
+36-Kb BRAM equiv. & 186.5 & 1,030 & 18.11\% \\
+DSP48E1 slices & 284 & 2,800 & 10.14\% \\
+\bottomrule
+\end{tabular}
 \end{table}
 
+The four percentages are arithmetically consistent with the reported counts. The fractional BRAM value denotes an 18-Kb block counted as half of a 36-Kb equivalent. One utilization point demonstrates fit on this device but cannot establish scaling with CFD count, timing closure, power, reliability, or suitability for smaller edge FPGAs.
+
 \section{Conclusion}
-
-As discussed in this paper, significant improvements have been made toward a spectrum sensor for edge devices.  There are a few topics that are still open for investigation.  
-
-\begin{itemize}
-\item Modeling and simulation suggests that the same threshold should work among various M-QAM parameters but should undergo further experimentation.
-\item Replacing the single-term DFT in the StSCA with a Goertzel algorithm may boost performance and reduce resources.
-\item The addition of a second threshold based on spectral coherence could further help reduce false alarms.
-\item The theoretical bit truncation and rounding values were found to be different from the experimental.
-\end{itemize} 
-
-We began this paper with a brief development history of the StSS and its applications for CR.  Following this, we discussed design additions and updates.  In the results section, we found that fabric utilization remains small for nominal parameters, and thus our objective is achieved.
+The architecture combines an instantaneous-power FFT preprocessor with the StSCA and a two-CFD distributor. The preserved synthesis summary shows that this configuration fits an XC7VX485T. It does not contain the measurements needed to demonstrate a throughput increase or maintain a calibrated detection operating point after preprocessing. A reproducible evaluation should release the HDL and testbench; identify the complete FPGA part, tool version, clock and FFT settings; report baseline-versus-hybrid frames or candidates per second; measure candidate drops and $P_d/P_{\mathrm{fa}}$ over the full search grid; and sweep CFD count to establish resource scaling. Goertzel single-bin DFT implementations and normalized spectral-coherence statistics remain hypotheses to benchmark rather than demonstrated improvements.
 
 \bibliographystyle{IEEEtran}
-\bibliography{IEEEabrv, refs.bib}
+\bibliography{IEEEabrv,refs}
 
 \end{document}
-
-
-
